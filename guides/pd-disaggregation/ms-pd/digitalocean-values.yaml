@@ -11,7 +11,8 @@ modelArtifacts:
 
 routing:
   modelName: Qwen/Qwen2.5-3B-Instruct
-
+  httpRoute:
+    create: false
 # Decode Pod: Override to single GPU setup optimized for DigitalOcean
 decode:
   replicas: 1
