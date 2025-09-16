@@ -11,7 +11,8 @@ modelArtifacts:
 
 routing:
   modelName: Qwen/Qwen3-0.6B
-
+  httpRoute:
+    create: false
 # Decode Pods: Override to single GPU setup optimized for DigitalOcean
 decode:
   replicas: 2  # Keep 2 replicas for scheduling demo
