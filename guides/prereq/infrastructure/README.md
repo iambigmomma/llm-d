@@ -72,7 +72,7 @@ Use the [LWS installation guide](https://lws.sigs.k8s.io/docs/installation/) to 
 The following documentation describes llm-d tested setup for cluster infrastructure providers as well as specific deployment settings that will impact how model servers is expected to access accelerators.
 
 * [CoreWeave Kubernetes Service (CKS)](../../../docs/infra-providers/cks/README.md)
-<!-- * [Digital Ocean (DO)](../../docs/infra-providers/digitalocean/README.md) -->
+* [DigitalOcean Kubernetes (DOKS)](../../../docs/infra-providers/digitalocean/README.md)
 * [Google Kubernetes Engine (GKE)](../../../docs/infra-providers/gke/README.md)
 * [OpenShift (OCP)](../../../docs/infra-providers/openshift/README.md), [OpenShift on AWS](../../../docs/infra-providers/openshift-aws/README.md)
 * [minikube](../../../docs/infra-providers/minikube/README.md) for single-host development

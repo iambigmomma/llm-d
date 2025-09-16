@@ -6,8 +6,8 @@ This document covers configuring DOKS clusters for running high performance LLM 
 
 llm-d on DOKS is tested with the following configurations:
 
-* GPU types: H100, RTX 6000 Ada, RTX 4000 Ada, L40S
-* Versions: DOKS 1.28+
+* GPU types: NVIDIA H100, NVIDIA RTX 6000 Ada, NVIDIA RTX 4000 Ada, NVIDIA L40S
+* Versions: DOKS 1.33.1-do.3 
 * Networking: VPC-native clusters (required)
 
 ## Cluster Configuration
