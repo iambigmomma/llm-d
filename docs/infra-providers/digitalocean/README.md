@@ -7,8 +7,21 @@ This document covers configuring DOKS clusters for running high performance LLM 
 llm-d on DOKS is tested with the following configurations:
 
 * GPU types: NVIDIA H100, NVIDIA RTX 6000 Ada, NVIDIA RTX 4000 Ada, NVIDIA L40S
-* Versions: DOKS 1.33.1-do.3 
+* Versions: DOKS 1.33.1-do.3
 * Networking: VPC-native clusters (required)
+
+## Configuration Architecture
+
+The DigitalOcean deployment follows clean configuration principles:
+
+* **Base Configuration**: `values.yaml` files maintain original design intent with high-end specs
+* **Platform Overrides**: `digitalocean-values.yaml` files contain ONLY DigitalOcean-specific modifications
+* **Conditional Loading**: Using `digitalocean` environment selectively applies DigitalOcean overrides
+
+This approach ensures:
+- Original configurations remain unchanged for other platforms
+- DigitalOcean optimizations are isolated and maintainable
+- Clear separation between base architecture and platform adaptations
 
 ## Cluster Configuration
 
@@ -64,59 +77,58 @@ kubectl get pods -n istio-system
 
 ### Step 3: Deploy Workloads
 
-Navigate to the appropriate guide and deploy with DigitalOcean-specific configurations:
+Use the `digitalocean` environment to automatically load DigitalOcean-specific value overrides:
 
 ```bash
-# For inference scheduling
+# For inference scheduling (2 decode pods)
 cd guides/inference-scheduling
 export NAMESPACE=llm-d-inference-scheduling
 helmfile apply -e digitalocean -n ${NAMESPACE}
-kubectl apply -f httproute.digitalocean.yaml
 
-# For P/D disaggregation
+# For P/D disaggregation (1 prefill + 1 decode pod)
 cd guides/pd-disaggregation
 export NAMESPACE=llm-d-pd
 helmfile apply -e digitalocean -n ${NAMESPACE}
-kubectl apply -f httproute.digitalocean.yaml
 ```
 
-**Note**: For P/D disaggregation, you may need to manually create the prefill service:
+**Key DigitalOcean Optimizations Applied Automatically:**
+- **Smaller Models**: Uses `Qwen3-0.6B` (inference-scheduling) and `Qwen2.5-3B-Instruct` (P/D) that don't require HuggingFace tokens
+- **Stable Images**: Uses production-ready `ghcr.io/llm-d/llm-d:v0.2.0` instead of development builds
+- **DOKS-Optimized Resources**: Reduced memory/CPU requirements suitable for DOKS GPU nodes
+- **GPU Tolerations**: Automatic scheduling on DigitalOcean GPU nodes with `nvidia.com/gpu` taints
+- **No RDMA**: Removes InfiniBand requirements not available on DOKS
 
-```bash
-kubectl apply -f - <<EOF
-apiVersion: v1
-kind: Service
-metadata:
-  name: ms-pd-prefill
-  namespace: llm-d-pd
-spec:
-  selector:
-    llm-d.ai/model: ms-pd-llm-d-modelservice
-    llm-d.ai/role: prefill
-  ports:
-  - name: http
-    port: 8000
-    protocol: TCP
-    targetPort: 8000
-  type: ClusterIP
-EOF
-```
+**Architecture Overview:**
+
+- **Inference Scheduling**: 2 decode pods with intelligent routing via InferencePool
+- **P/D Disaggregation**: 1 prefill pod + 1 decode pod with automatic InferencePool and HTTPRoute creation
 
 ### Step 4: Testing
 
 Verify deployment success:
 
 ```bash
-# Check deployment status
-kubectl get pods -n llm-d-pd
-kubectl get gateway -n llm-d-pd
+# Check deployment status for inference scheduling
+kubectl get pods -n llm-d-inference-scheduling
+kubectl get gateway -n llm-d-inference-scheduling
 
-# Test inference endpoint
+# Check deployment status for P/D disaggregation
+kubectl get pods -n llm-d-pd
+kubectl get gateway,inferencepool,httproute -n llm-d-pd
+
+# Test inference endpoint (P/D disaggregation example)
 kubectl port-forward -n llm-d-pd svc/infra-pd-inference-gateway-istio 8080:80
 
 curl -X POST http://localhost:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{"model": "Qwen/Qwen2.5-3B-Instruct", "messages": [{"role": "user", "content": "hello"}], "max_tokens": 20}'
+
+# Test inference endpoint (inference scheduling example)
+kubectl port-forward -n llm-d-inference-scheduling svc/infra-inference-scheduling-inference-gateway-istio 8080:80
+
+curl -X POST http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model": "Qwen/Qwen3-0.6B", "messages": [{"role": "user", "content": "hello"}], "max_tokens": 20}'
 ```
 
 ## Monitoring (Optional)
@@ -135,6 +147,68 @@ We recommend enabling the monitoring stack to track:
 - Inference request latency and throughput
 - Memory usage and KV cache efficiency
 - Network performance between prefill/decode pods
+
+## DigitalOcean-Specific Configuration Details
+
+### Model Selection
+
+The DigitalOcean deployment uses smaller, optimized models:
+
+| Architecture | Original Model | DigitalOcean Model | Benefits |
+|-------------|----------------|--------------------|---------|
+| Inference Scheduling | `Qwen3-0.6B` + HF Token | `Qwen3-0.6B` (no token) | No authentication required |
+| P/D Disaggregation | `Llama-3.3-70B` + HF Token | `Qwen2.5-3B-Instruct` (no token) | 8x smaller, faster loading |
+
+### Resource Optimization
+
+**Original Specs (for reference):**
+```yaml
+# P/D Disaggregation - Original
+resources:
+  limits:
+    memory: 64Gi
+    cpu: "16"  # decode: 16, prefill: 8
+    nvidia.com/gpu: "4"  # decode: 4, prefill: 1
+    rdma/ib: 1
+replicas: 4  # prefill replicas
+```
+
+**DigitalOcean Optimized:**
+```yaml
+# P/D Disaggregation - DigitalOcean
+resources:
+  limits:
+    memory: 16Gi
+    cpu: "4"
+    nvidia.com/gpu: "1"
+    # No RDMA requirement
+replicas: 1  # prefill replicas
+```
+
+### GPU Node Configuration
+
+DigitalOcean DOKS GPU nodes use taints to prevent non-GPU workloads from scheduling:
+
+```yaml
+# Automatically applied tolerations
+tolerations:
+- key: "nvidia.com/gpu"
+  operator: "Exists"
+  effect: "NoSchedule"
+```
+
+### Architecture Differences
+
+**Inference Scheduling on DOKS:**
+- 2 decode pods with InferencePool routing
+- Single GPU per pod (optimal for DOKS node sizes)
+- Intelligent request distribution
+
+**P/D Disaggregation on DOKS:**
+- 1 prefill pod (handles initial token processing)
+- 1 decode pod (handles generation)
+- InferencePool + HTTPRoute for proper routing
+- Reduced from 4+4 GPUs to 1+1 GPUs total
 
 ## Troubleshooting
 
@@ -172,16 +246,29 @@ kubectl describe svc <service-name> -n <namespace>
 
 **Error**: `untolerated taint {nvidia.com/gpu}`
 
-**Solution**: Verify GPU tolerations are automatically applied:
+**Cause**: DigitalOcean GPU nodes have automatic taints to prevent non-GPU workloads
+
+**Solution**: DigitalOcean values automatically include required tolerations. Verify they're applied:
 ```bash
 kubectl describe pod <pod-name> -n <namespace> | grep Tolerations
+
+# Should show:
+# Tolerations: nvidia.com/gpu:NoSchedule op=Exists
 ```
 
-#### 4. Missing Prefill Service (P/D Disaggregation)
+If tolerations are missing, ensure you're using the `digitalocean` environment which loads DigitalOcean overrides.
 
-**Error**: HTTPRoute references non-existent `ms-pd-prefill` service
+#### 4. InferencePool or HTTPRoute Not Created (P/D Disaggregation)
 
-**Solution**: Manually create the service (see P/D deployment steps above)
+**Error**: HTTPRoute references non-existent InferencePool
+
+**Solution**: Verify DigitalOcean values override is loading correctly:
+```bash
+kubectl get inferencepool -n llm-d-pd
+kubectl get httproute -n llm-d-pd
+```
+
+The DigitalOcean configuration automatically enables InferencePool and HTTPRoute creation for proper P/D routing.
 
 #### 5. Gateway Not Programmed
 
@@ -199,7 +286,6 @@ kubectl get gateway -n <namespace>
 ```bash
 # Remove specific deployment
 export NAMESPACE=llm-d-pd # or llm-d-inference-scheduling
-kubectl delete -f httproute.digitalocean.yaml
 helmfile destroy -e digitalocean -n ${NAMESPACE}
 
 # Remove prerequisites (affects all deployments)
@@ -207,5 +293,20 @@ cd guides/prereq/gateway-provider
 helmfile destroy -f istio.helmfile.yaml
 ./install-gateway-provider-dependencies.sh delete
 ```
+
+## Configuration Files Reference
+
+### Base Configurations (Unchanged)
+- `guides/inference-scheduling/ms-inference-scheduling/values.yaml`
+- `guides/pd-disaggregation/ms-pd/values.yaml`
+
+### DigitalOcean Overrides (Platform-Specific)
+- `guides/inference-scheduling/ms-inference-scheduling/digitalocean-values.yaml`
+- `guides/pd-disaggregation/ms-pd/digitalocean-values.yaml`
+
+### Helmfile Configuration
+- Uses `digitalocean` environment to conditionally load DigitalOcean overrides
+- Only applies platform-specific configurations when explicitly using `-e digitalocean`
+- Follows clean configuration architecture principles with proper environment separation
 
 For detailed configuration options and advanced setups, see the main [llm-d guides](../../../guides/).

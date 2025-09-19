@@ -12,24 +12,7 @@ environments:
     values:
       - ../prereq/gateway-provider/common-configurations/gke_tpu.yaml
   digitalocean: &DO
-    values:
-      - ../prereq/gateway-provider/common-configurations/istio.yaml
-      # DigitalOcean Gateway API v1 compatibility override
-      - gateway:
-          gatewayClassName: istio
-          listeners:
-            - name: default
-              port: 80
-              protocol: HTTP
-              allowedRoutes:
-                namespaces:
-                  from: All
-          destinationRule:
-            enabled: true
-            trafficPolicy:
-              tls:
-                mode: SIMPLE
-                insecureSkipVerify: true
+    <<: *I
   default:
     <<: *I
 

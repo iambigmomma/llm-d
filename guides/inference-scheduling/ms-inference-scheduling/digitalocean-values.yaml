@@ -2,32 +2,33 @@
 # This file contains ONLY the values that need to be overridden for DigitalOcean DOKS
 # Architecture: 2 Decode Pods for intelligent scheduling (no P/D disaggregation)
 
-# Use Qwen public model - no HuggingFace token required
+# DigitalOcean-specific model configuration (smaller model for DOKS)
 modelArtifacts:
-  uri: "hf://Qwen/Qwen3-0.6B"
+  uri: "hf://Qwen/Qwen3-0.6B"  # Smaller model that doesn't require HF token
   name: "Qwen/Qwen3-0.6B"
-  size: 8Gi  # Reduced size for public model
-  authSecretName: ""  # Disable HF token for public model
+  size: 8Gi  
+  authSecretName: ""  # No HF token required for this model
 
 routing:
-  modelName: Qwen/Qwen3-0.6B
+  modelName: Qwen/Qwen3-0.6B  # Match the model name
+  # Enable HTTPRoute for inference scheduling
   httpRoute:
-    create: false
-# Decode Pods: Override to single GPU setup optimized for DigitalOcean
+    create: true
+
+# DigitalOcean-specific container configuration
 decode:
-  replicas: 2  # Keep 2 replicas for scheduling demo
   containers:
   - name: "vllm"
-    image: "ghcr.io/llm-d/llm-d:v0.2.0"  # Use stable release
-    modelCommand: vllmServe
+    image: "ghcr.io/llm-d/llm-d:v0.2.0"  # Use stable version
+    modelCommand: vllmServe  # Required by chart
     args:
       - "--enforce-eager"
       - "--kv-transfer-config"
       - '{"kv_connector":"NixlConnector", "kv_role":"kv_both"}'
-      - "--gpu-memory-utilization"
-      - "0.85"  # Optimize for RTX 6000 Ada
-      - "--max-model-len"
-      - "4096"  # Smaller context for 0.6B model
+      - "--gpu-memory-utilization"  # DigitalOcean GPU optimization
+      - "0.85"
+      - "--max-model-len"  # Optimized for smaller model
+      - "4096"
     env:
       - name: CUDA_VISIBLE_DEVICES
         value: "0"
@@ -39,24 +40,45 @@ decode:
             fieldPath: status.podIP
       - name: VLLM_NIXL_SIDE_CHANNEL_PORT
         value: "5557"
-    resources:
+      - name: VLLM_LOGGING_LEVEL
+        value: DEBUG
+      - name: DP_SIZE
+        value: "1"
+      - name: TP_SIZE
+        value: "1"
+    ports:
+      - containerPort: 5557
+        protocol: TCP
+      - containerPort: 8200
+        name: metrics
+        protocol: TCP
+    resources:  # Required for DOKS GPU nodes
       limits:
         memory: 16Gi
         cpu: "4"
-        nvidia.com/gpu: "1"  # Single GPU, no RDMA for DOKS compatibility
+        nvidia.com/gpu: "1"
       requests:
         memory: 16Gi
         cpu: "4"
         nvidia.com/gpu: "1"
+    mountModelVolume: true
     volumeMounts:
     - name: shm
       mountPath: /dev/shm
+    - name: metrics-volume
+      mountPath: /.config
+    - name: torch-compile-cache
+      mountPath: /.cache
   volumes:
   - name: shm
     emptyDir:
       medium: Memory
-      sizeLimit: "4Gi"
-  # DigitalOcean GPU node tolerations
+      sizeLimit: "4Gi"  # Optimized for DigitalOcean
+  - name: metrics-volume
+    emptyDir: {}
+  - name: torch-compile-cache
+    emptyDir: {}
+  # IMPORTANT: DigitalOcean GPU node tolerations
   tolerations:
   - key: "nvidia.com/gpu"
     operator: "Exists"
