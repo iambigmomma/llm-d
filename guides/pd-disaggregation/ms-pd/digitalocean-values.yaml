@@ -1,33 +1,37 @@
-# DigitalOcean P/D Disaggregation Override
+# DigitalOcean P/D Disaggregation Minimal Override
 # This file contains ONLY the values that need to be overridden for DigitalOcean DOKS
 # Architecture: 1 Prefill Pod (1 GPU) + 1 Decode Pod (1 GPU) = 2 GPUs total
 
-# DigitalOcean-specific model configuration (smaller model for DOKS)
+# Use smaller public model - no HuggingFace token required
 modelArtifacts:
-  uri: "hf://Qwen/Qwen2.5-3B-Instruct"  # Smaller model that works well on DOKS
+  uri: "hf://Qwen/Qwen2.5-3B-Instruct"
+  size: 8Gi  # Smaller model
   name: "Qwen/Qwen2.5-3B-Instruct"
-  size: 8Gi  # Reduced size for DigitalOcean deployment
-  authSecretName: ""  # No HF token required for this model
+  authSecretName: ""  # Disable HF token for public model
 
+# Enable direct Service routing (bypass InferencePool)
 routing:
   modelName: Qwen/Qwen2.5-3B-Instruct  # Match the model name
-  # Follow original P/D design - disable InferencePool/EPP, use direct routing
-  inferencePool:
-    create: false
+  # Disable HTTPRoute to avoid InferencePool dependency
   httpRoute:
     create: false
-  epp:
+  # Disable InferencePool creation
+  inferencePool:
     create: false
+  # Create InferenceModel for service discovery
+  inferenceModel:
+    create: true
+    criticality: Critical
 
-# DigitalOcean-specific decode configuration
+# Decode Pod: Reduce from 4 GPUs to 1 GPU for DOKS compatibility
 decode:
   containers:
   - name: "vllm"
-    image: "ghcr.io/llm-d/llm-d:v0.2.0"  # Use stable version instead of dev
+    image: "ghcr.io/llm-d/llm-d:v0.2.0"  # Use stable version
     modelCommand: vllmServe  # Required by chart
     args:
       - "--tensor-parallel-size"
-      - "1"  # Single GPU per pod for DigitalOcean (original uses 4)
+      - "1"  # Single GPU instead of 4
       - "--block-size"
       - "128"
       - "--kv-transfer-config"
@@ -36,61 +40,28 @@ decode:
       - "--disable-uvicorn-access-log"
       - "--max-model-len"
       - "8192"  # Reduced for smaller model
-    env:
-      - name: VLLM_NIXL_SIDE_CHANNEL_HOST
-        valueFrom:
-          fieldRef:
-            fieldPath: status.podIP
-      - name: VLLM_LOGGING_LEVEL
-        value: DEBUG
-      - name: DP_SIZE
-        value: "1"
-      - name: TP_SIZE
-        value: "1"
-    ports:
-      - containerPort: 8200
-        name: metrics
-        protocol: TCP
-    resources:  # Reduced from original high-end specs for DOKS
+    resources:
       limits:
-        memory: 16Gi  
-        cpu: "4"      
-        nvidia.com/gpu: "1"  
-        # rdma/ib: 1  # Remove RDMA requirement for DigitalOcean
+        memory: 16Gi  # Reduced from 64Gi
+        cpu: "4"      # Reduced from 16
+        nvidia.com/gpu: "1"  # Reduced from 4
+        # Remove RDMA requirement for DigitalOcean
       requests:
-        memory: 16Gi  
-        cpu: "4"      
-        nvidia.com/gpu: "1"  
-        # rdma/ib: 1  # Remove RDMA requirement for DigitalOcean
-    mountModelVolume: true
-    volumeMounts:
-    - name: metrics-volume
-      mountPath: /.config
-    - name: shm
-      mountPath: /dev/shm
-    - name: torch-compile-cache
-      mountPath: /.cache
-  volumes:
-  - name: metrics-volume
-    emptyDir: {}
-  - name: shm
-    emptyDir:
-      medium: Memory
-      sizeLimit: "16Gi"
-  - name: torch-compile-cache
-    emptyDir: {}
-  #  IMPORTANT: DigitalOcean GPU node tolerations
+        memory: 16Gi
+        cpu: "4"
+        nvidia.com/gpu: "1"
+  # DigitalOcean GPU node tolerations
   tolerations:
   - key: "nvidia.com/gpu"
     operator: "Exists"
     effect: "NoSchedule"
 
-# DigitalOcean-specific prefill configuration
+# Prefill Pods: Reduce from 4 replicas to 1 replica
 prefill:
-  replicas: 1  
+  replicas: 1  # Single prefill pod instead of 4
   containers:
   - name: "vllm"
-    image: "ghcr.io/llm-d/llm-d:v0.2.0"  # Use stable version instead of dev
+    image: "ghcr.io/llm-d/llm-d:v0.2.0"  # Use stable version
     modelCommand: vllmServe  # Required by chart
     args:
       - "--block-size"
@@ -100,51 +71,18 @@ prefill:
       - "--disable-log-requests"
       - "--disable-uvicorn-access-log"
       - "--max-model-len"
-      - "8192"  # Reduced from original 32000 for smaller model
-    env:
-      - name: VLLM_NIXL_SIDE_CHANNEL_HOST
-        valueFrom:
-          fieldRef:
-            fieldPath: status.podIP
-      - name: VLLM_LOGGING_LEVEL
-        value: DEBUG
-      - name: DP_SIZE
-        value: "1"
-      - name: TP_SIZE
-        value: "1"
-    ports:
-      - containerPort: 8000
-        name: metrics
-        protocol: TCP
-    resources:  # Reduced from original high-end specs for DOKS
+      - "8192"  # Reduced for smaller model
+    resources:
       limits:
-        memory: 16Gi  
-        cpu: "4"      
-        nvidia.com/gpu: "1"  
-        # rdma/ib: 1  # Remove RDMA requirement for DigitalOcean
+        memory: 16Gi  # Reduced from 64Gi
+        cpu: "4"      # Reduced from 8
+        nvidia.com/gpu: "1"  # Same GPU count
+        # Remove RDMA requirement for DigitalOcean
       requests:
-        memory: 16Gi  
-        cpu: "4"      
-        nvidia.com/gpu: "1"  
-        # rdma/ib: 1  # Remove RDMA requirement for DigitalOcean
-    mountModelVolume: true
-    volumeMounts:
-    - name: metrics-volume
-      mountPath: /.config
-    - name: shm
-      mountPath: /dev/shm
-    - name: torch-compile-cache
-      mountPath: /.cache
-  volumes:
-  - name: metrics-volume
-    emptyDir: {}
-  - name: shm
-    emptyDir:
-      medium: Memory
-      sizeLimit: "16Gi"
-  - name: torch-compile-cache
-    emptyDir: {}
-  #  IMPORTANT: DigitalOcean GPU node tolerations
+        memory: 16Gi
+        cpu: "4"
+        nvidia.com/gpu: "1"
+  # DigitalOcean GPU node tolerations
   tolerations:
   - key: "nvidia.com/gpu"
     operator: "Exists"

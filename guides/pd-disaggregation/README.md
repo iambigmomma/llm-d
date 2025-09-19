@@ -67,14 +67,6 @@ To see specify your gateway choice you can use the `-e <gateway option>` flag, e
 helmfile apply -e kgateway -n ${NAMESPACE}
 ```
 
-For DigitalOcean Kubernetes Service (DOKS) with minimal 2-GPU P/D disaggregation:
-
-```bash
-helmfile apply -e digitalocean -n ${NAMESPACE}
-```
-
-**Note:** DigitalOcean deployment uses public Qwen/Qwen2.5-3B-Instruct model (no HuggingFace token required) with optimized resource allocation for DOKS GPU nodes. This configuration uses 1 Prefill Pod (1 GPU) + 1 Decode Pod (1 GPU) instead of the default 8-GPU setup.
-
 To see what gateway options are supported refer to our [gateway provider prereq doc](../prereq/gateway-provider/README.md#supported-providers). Gateway configurations per provider are tracked in the [gateway-configurations directory](../prereq/gateway-provider/common-configurations/).
 
 You can also customize your gateway, for more information on how to do that see our [gateway customization docs](../../docs/customizing-your-gateway.md).
@@ -102,13 +94,14 @@ kubectl apply -f httproute.gke.yaml
 #### Install for "digitalocean"
 
 ```bash
-kubectl apply -f httproute.digitalocean.yaml
+kubectl apply -f httproute-digitalocean.yaml
 ```
 
 ## Verify the Installation
 
-- Firstly, you should be able to list all helm releases to view the 3 charts got installed into your chosen namespace:
+- Firstly, you should be able to list all helm releases to view the charts got installed into your chosen namespace:
 
+**For most environments (with InferencePool):**
 ```bash
 helm list -n ${NAMESPACE}
 NAME        NAMESPACE   REVISION    UPDATED                                 STATUS      CHART                       APP VERSION
@@ -117,8 +110,17 @@ infra-pd    llm-d-pd    1           2025-08-24 12:54:46.983361 -0700 PDT    depl
 ms-pd       llm-d-pd    1           2025-08-24 12:54:56.736873 -0700 PDT    deployed    llm-d-modelservice-v0.2.7   v0.2.0
 ```
 
+**For DigitalOcean (simplified architecture):**
+```bash
+helm list -n ${NAMESPACE}
+NAME        NAMESPACE   REVISION    UPDATED                                 STATUS      CHART                       APP VERSION
+infra-pd    llm-d-pd    1           2025-08-24 12:54:46.983361 -0700 PDT    deployed    llm-d-infra-v1.2.4          v0.2.0
+ms-pd       llm-d-pd    1           2025-08-24 12:54:56.736873 -0700 PDT    deployed    llm-d-modelservice-v0.2.7   v0.2.0
+```
+
 - Out of the box with this example you should have the following resources:
 
+**For most environments (with InferencePool):**
 ```bash
 kubectl get all -n ${NAMESPACE}
 NAME                                                    READY   STATUS    RESTARTS   AGE
@@ -146,6 +148,30 @@ replicaset.apps/gaie-pd-epp-54444ddc66                        1         1       
 replicaset.apps/infra-pd-inference-gateway-istio-56d66db57f   1         1         1       2m42s
 replicaset.apps/ms-pd-llm-d-modelservice-decode-84bf6d5bdd    1         1         1       2m31s
 replicaset.apps/ms-pd-llm-d-modelservice-prefill-86f6fb7cdc   4         4         4       2m31s
+```
+
+**For DigitalOcean (simplified architecture):**
+```bash
+kubectl get all -n ${NAMESPACE}
+NAME                                                    READY   STATUS    RESTARTS   AGE
+pod/infra-pd-inference-gateway-istio-56d66db57f-zwtzn   1/1     Running   0          2m41s
+pod/ms-pd-llm-d-modelservice-decode-84bf6d5bdd-jzfjn    2/2     Running   0          2m30s
+pod/ms-pd-llm-d-modelservice-prefill-86f6fb7cdc-8kfb8   1/1     Running   0          2m30s
+
+NAME                                          TYPE           CLUSTER-IP    EXTERNAL-IP   PORT(S)                        AGE
+service/infra-pd-inference-gateway-istio      LoadBalancer   10.16.3.74    10.16.4.3     15021:31707/TCP,80:34096/TCP   2m41s
+service/ms-pd-llm-d-modelservice-decode       ClusterIP      10.16.0.100   <none>        8000/TCP                       2m30s
+service/ms-pd-llm-d-modelservice-prefill      ClusterIP      10.16.0.101   <none>        8000/TCP                       2m30s
+
+NAME                                               READY   UP-TO-DATE   AVAILABLE   AGE
+deployment.apps/infra-pd-inference-gateway-istio   1/1     1            1           2m42s
+deployment.apps/ms-pd-llm-d-modelservice-decode    1/1     1            1           2m31s
+deployment.apps/ms-pd-llm-d-modelservice-prefill   1/1     1            1           2m31s
+
+NAME                                                          DESIRED   CURRENT   READY   AGE
+replicaset.apps/infra-pd-inference-gateway-istio-56d66db57f   1         1         1       2m42s
+replicaset.apps/ms-pd-llm-d-modelservice-decode-84bf6d5bdd    1         1         1       2m31s
+replicaset.apps/ms-pd-llm-d-modelservice-prefill-86f6fb7cdc   1         1         1       2m31s
 ```
 
 **_NOTE:_** This assumes no other guide deployments in your given `${NAMESPACE}` and you have not changed the default release names via the `${RELEASE_NAME}` environment variable.
@@ -191,7 +217,7 @@ kubectl delete -f httproute.gke.yaml
 #### Cleanup for "digitalocean"
 
 ```bash
-kubectl delete -f httproute.digitalocean.yaml
+kubectl delete -f httproute-digitalocean.yaml
 ```
 
 ## Customization
