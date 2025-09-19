@@ -3,8 +3,7 @@ environments:
     values:
       - ../prereq/gateway-provider/common-configurations/istio.yaml
   digitalocean: &DO
-    values:
-      - ../prereq/gateway-provider/common-configurations/istio.yaml
+    <<: *I
   default:
     <<: *I
 
@@ -43,23 +42,12 @@ releases:
       - {{ printf "infra-%s" $rn | quote }}
     values:
       - ms-pd/values.yaml
-      {{- if eq .Environment.Name "digitalocean" }}
+    {{- if eq .Environment.Name "digitalocean" }}
       - ms-pd/digitalocean-values.yaml
-      {{- end }}
+    {{- end }}
     set:
       # Direct routing without InferencePool
       - name: "routing.parentRefs[0].name"
         value: {{ printf "infra-%s-inference-gateway" $rn | quote }}
-      # Remove RDMA for DigitalOcean compatibility
-      {{- if eq .Environment.Name "digitalocean" }}
-      - name: "decode.containers[0].resources.limits.rdma/ib"
-        value: null
-      - name: "decode.containers[0].resources.requests.rdma/ib"
-        value: null
-      - name: "prefill.containers[0].resources.limits.rdma/ib"
-        value: null
-      - name: "prefill.containers[0].resources.requests.rdma/ib"
-        value: null
-      {{- end }}
     labels:
       kind: inference-stack
