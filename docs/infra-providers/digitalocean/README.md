@@ -89,6 +89,7 @@ helmfile apply -e digitalocean -n ${NAMESPACE}
 cd guides/pd-disaggregation
 export NAMESPACE=llm-d-pd
 helmfile apply -e digitalocean -n ${NAMESPACE}
+kubectl apply -f httproute-digitalocean.yaml
 ```
 
 **Key DigitalOcean Optimizations Applied Automatically:**
@@ -101,7 +102,7 @@ helmfile apply -e digitalocean -n ${NAMESPACE}
 **Architecture Overview:**
 
 - **Inference Scheduling**: 2 decode pods with intelligent routing via InferencePool
-- **P/D Disaggregation**: 1 prefill pod + 1 decode pod with automatic InferencePool and HTTPRoute creation
+- **P/D Disaggregation**: 1 prefill pod + 1 decode pod with direct service routing (simplified architecture without InferencePool)
 
 ### Step 4: Testing
 
@@ -114,7 +115,7 @@ kubectl get gateway -n llm-d-inference-scheduling
 
 # Check deployment status for P/D disaggregation
 kubectl get pods -n llm-d-pd
-kubectl get gateway,inferencepool,httproute -n llm-d-pd
+kubectl get gateway,service,httproute -n llm-d-pd
 
 # Test inference endpoint (P/D disaggregation example)
 kubectl port-forward -n llm-d-pd svc/infra-pd-inference-gateway-istio 8080:80
@@ -207,7 +208,7 @@ tolerations:
 **P/D Disaggregation on DOKS:**
 - 1 prefill pod (handles initial token processing)
 - 1 decode pod (handles generation)
-- InferencePool + HTTPRoute for proper routing
+- Direct Service + HTTPRoute routing (simplified architecture)
 - Reduced from 4+4 GPUs to 1+1 GPUs total
 
 ## Troubleshooting
@@ -258,17 +259,19 @@ kubectl describe pod <pod-name> -n <namespace> | grep Tolerations
 
 If tolerations are missing, ensure you're using the `digitalocean` environment which loads DigitalOcean overrides.
 
-#### 4. InferencePool or HTTPRoute Not Created (P/D Disaggregation)
+#### 4. HTTPRoute Not Created (P/D Disaggregation)
 
-**Error**: HTTPRoute references non-existent InferencePool
+**Error**: HTTPRoute or Services not found
 
-**Solution**: Verify DigitalOcean values override is loading correctly:
+**Solution**: Ensure you applied the DigitalOcean-specific HTTPRoute:
 ```bash
-kubectl get inferencepool -n llm-d-pd
-kubectl get httproute -n llm-d-pd
+kubectl get service,httproute -n llm-d-pd
+
+# If missing, apply the DigitalOcean HTTPRoute
+kubectl apply -f httproute-digitalocean.yaml
 ```
 
-The DigitalOcean configuration automatically enables InferencePool and HTTPRoute creation for proper P/D routing.
+The DigitalOcean configuration uses direct service routing instead of InferencePool for simplified architecture.
 
 #### 5. Gateway Not Programmed
 
@@ -287,6 +290,9 @@ kubectl get gateway -n <namespace>
 # Remove specific deployment
 export NAMESPACE=llm-d-pd # or llm-d-inference-scheduling
 helmfile destroy -e digitalocean -n ${NAMESPACE}
+
+# For P/D disaggregation, also remove the HTTPRoute
+kubectl delete -f httproute-digitalocean.yaml
 
 # Remove prerequisites (affects all deployments)
 cd guides/prereq/gateway-provider

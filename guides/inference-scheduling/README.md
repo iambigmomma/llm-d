@@ -70,7 +70,7 @@ kubectl apply -f httproute.gke.yaml
 #### Install for "digitalocean"
 
 ```bash
-kubectl apply -f httproute.digitalocean.yaml
+kubectl apply -f httproute.yaml
 ```
 
 ## Verify the Installation
@@ -154,7 +154,7 @@ kubectl delete -f httproute.gke.yaml
 #### Cleanup for "digitalocean"
 
 ```bash
-kubectl delete -f httproute.digitalocean.yaml
+kubectl delete -f httproute.yaml
 ```
 
 ## Customization
